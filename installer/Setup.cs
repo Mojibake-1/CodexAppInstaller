@@ -22,7 +22,7 @@ namespace CodexSetup
     internal static class App
     {
         public const string ProductName = "Codex 安装程序";
-        public const string Version = "2.0.1";
+        public const string Version = "2.0.2";
         public const string Publisher = "Codex App Installer";
         public const string AppId = "CodexAppInstaller";
 
@@ -61,16 +61,35 @@ namespace CodexSetup
         [STAThread]
         private static int Main(string[] args)
         {
-            bool silent = false, uninstall = false;
+            bool silent = false, uninstall = false, install = false;
             foreach (string a in args)
             {
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "s" || s == "silent" || s == "verysilent" || s == "q" || s == "quiet") silent = true;
-                if (s == "uninstall" || s == "u" || s == "x") uninstall = true;
+                else if (s == "uninstall" || s == "u" || s == "x") uninstall = true;
+                else if (s == "install" || s == "i") install = true;
             }
+
+            // The uninstaller is a copy of this exe named "uninstall.exe" placed in the install
+            // folder. When it is launched (double-clicked, or by Add/Remove Programs) it must
+            // UNINSTALL, not show the install UI — unless explicitly told to install.
+            bool launchedAsUninstaller = false;
+            try
+            {
+                string exeName = Path.GetFileNameWithoutExtension(Process.GetCurrentProcess().MainModule.FileName);
+                launchedAsUninstaller = string.Equals(exeName, "uninstall", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { }
+            if (launchedAsUninstaller && !install) uninstall = true;
 
             if (uninstall)
             {
+                if (!silent)
+                {
+                    MessageBoxResult r = MessageBox.Show("确定要卸载 " + App.ProductName + " 吗？",
+                        App.ProductName, MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (r != MessageBoxResult.Yes) return 0;
+                }
                 try { Installer.Uninstall(); } catch { }
                 if (!silent)
                     MessageBox.Show(App.ProductName + " 已卸载。", App.ProductName, MessageBoxButton.OK, MessageBoxImage.Information);
@@ -120,9 +139,11 @@ namespace CodexSetup
             // directly. Hand off to a detached cmd that waits for us to exit, then removes it.
             try
             {
-                string dir = App.InstallDir;
+                // Retry rmdir for up to ~30s: it fails while uninstall.exe is still locked
+                // (we are running from inside the dir), then succeeds once this process exits.
+                string dq = "\"" + App.InstallDir + "\"";
                 var psi = new ProcessStartInfo("cmd.exe",
-                    "/c timeout /t 2 /nobreak >nul & rmdir /s /q \"" + dir + "\"")
+                    "/c for /l %i in (1,1,30) do (rmdir /s /q " + dq + " 2>nul & if not exist " + dq + " (exit) else (timeout /t 1 /nobreak >nul))")
                 {
                     CreateNoWindow = true,
                     UseShellExecute = false,
