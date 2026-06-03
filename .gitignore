@@ -1,0 +1,11 @@
+# Build outputs (shipped via GitHub Releases, not committed)
+/CodexAppInstaller.exe
+/CodexAppInstaller.winforms.bak.exe
+*.bak.exe
+/dist/
+
+# Editor / OS
+.vs/
+*.user
+Thumbs.db
+desktop.ini
