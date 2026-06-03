@@ -22,7 +22,7 @@ namespace CodexSetup
     internal static class App
     {
         public const string ProductName = "Codex 安装程序";
-        public const string Version = "2.0.0";
+        public const string Version = "2.0.1";
         public const string Publisher = "Codex App Installer";
         public const string AppId = "CodexAppInstaller";
 

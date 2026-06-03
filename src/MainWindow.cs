@@ -482,17 +482,46 @@ namespace CodexAppInstaller
             else StartJob(false);
         }
 
+        private const string AppFolderName = "Codex";
+
         private void OnBrowse()
         {
             IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            string picked = FolderPicker.Pick(hwnd, "选择 Codex 的安装位置", _targetDir);
-            if (!string.IsNullOrEmpty(picked))
+
+            // The picker should open at the PARENT of the current target (the target already
+            // ends with the Codex folder), so the user re-picks the containing directory.
+            string initial = ParentOfTarget(_targetDir);
+
+            string picked = FolderPicker.Pick(hwnd, "选择安装位置（将在其中创建 Codex 文件夹）", initial);
+            if (string.IsNullOrEmpty(picked)) return;
+
+            // Treat the chosen folder as the parent and install into "<picked>\Codex",
+            // unless the user already picked a folder named Codex.
+            string leaf = "";
+            try { leaf = Path.GetFileName(picked.TrimEnd('\\', '/')); } catch { }
+            _targetDir = string.Equals(leaf, AppFolderName, StringComparison.OrdinalIgnoreCase)
+                ? picked
+                : Path.Combine(picked, AppFolderName);
+
+            _pathText.Text = ShortenPath(_targetDir);
+            _pathText.ToolTip = _targetDir;
+            UpdateDiskFree();
+        }
+
+        private static string ParentOfTarget(string target)
+        {
+            try
             {
-                _targetDir = picked;
-                _pathText.Text = ShortenPath(_targetDir);
-                _pathText.ToolTip = _targetDir;
-                UpdateDiskFree();
+                string trimmed = target.TrimEnd('\\', '/');
+                string leaf = Path.GetFileName(trimmed);
+                if (string.Equals(leaf, AppFolderName, StringComparison.OrdinalIgnoreCase))
+                {
+                    string parent = Path.GetDirectoryName(trimmed);
+                    if (!string.IsNullOrEmpty(parent)) return parent;
+                }
             }
+            catch { }
+            return target;
         }
 
         private void OnOpenFolder()
