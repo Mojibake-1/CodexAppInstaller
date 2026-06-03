@@ -22,7 +22,7 @@ namespace CodexSetup
     internal static class App
     {
         public const string ProductName = "Codex 安装程序";
-        public const string Version = "2.0.2";
+        public const string Version = "2.0.3";
         public const string Publisher = "Codex App Installer";
         public const string AppId = "CodexAppInstaller";
 
@@ -90,10 +90,23 @@ namespace CodexSetup
                         App.ProductName, MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (r != MessageBoxResult.Yes) return 0;
                 }
-                try { Installer.Uninstall(); } catch { }
+                string error;
+                bool ok;
+                try { ok = Installer.Uninstall(out error); }
+                catch (Exception ex) { ok = false; error = ex.Message; }
+
                 if (!silent)
-                    MessageBox.Show(App.ProductName + " 已卸载。", App.ProductName, MessageBoxButton.OK, MessageBoxImage.Information);
-                return 0;
+                {
+                    if (ok)
+                        MessageBox.Show(App.ProductName + " 已卸载。", App.ProductName, MessageBoxButton.OK, MessageBoxImage.Information);
+                    else
+                        MessageBox.Show("卸载未完全成功，请手动检查：\n\n" + error, App.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                else if (!ok)
+                {
+                    Console.Error.WriteLine("Uninstall failed: " + error);
+                }
+                return ok ? 0 : 1;   // non-zero so Add/Remove Programs and scripts see the failure
             }
 
             if (silent)
@@ -129,18 +142,24 @@ namespace CodexSetup
             RegisterUninstall();
         }
 
-        public static void Uninstall()
+        // Returns true only if every step we can verify synchronously succeeded. The install
+        // folder is removed by a detached process (we run from inside it), so its final
+        // removal cannot be confirmed here — but a failure to LAUNCH that process is reported.
+        public static bool Uninstall(out string error)
         {
-            SafeDelete(App.StartMenuLnk);
-            SafeDelete(App.DesktopLnk);
-            try { Registry.CurrentUser.DeleteSubKeyTree(App.RegUninstall, false); } catch { }
+            var problems = new System.Text.StringBuilder();
+
+            TryDeleteFile(App.StartMenuLnk, "开始菜单快捷方式", problems);
+            TryDeleteFile(App.DesktopLnk, "桌面快捷方式", problems);
+
+            try { Registry.CurrentUser.DeleteSubKeyTree(App.RegUninstall, false); }
+            catch (Exception ex) { problems.AppendLine("• 注册表卸载项：" + ex.Message); }
 
             // We are running from inside InstallDir (uninstall.exe), so we cannot delete it
-            // directly. Hand off to a detached cmd that waits for us to exit, then removes it.
+            // directly. Hand off to a detached cmd that retries rmdir for ~30s — it fails
+            // while uninstall.exe is still locked, then succeeds once this process exits.
             try
             {
-                // Retry rmdir for up to ~30s: it fails while uninstall.exe is still locked
-                // (we are running from inside the dir), then succeeds once this process exits.
                 string dq = "\"" + App.InstallDir + "\"";
                 var psi = new ProcessStartInfo("cmd.exe",
                     "/c for /l %i in (1,1,30) do (rmdir /s /q " + dq + " 2>nul & if not exist " + dq + " (exit) else (timeout /t 1 /nobreak >nul))")
@@ -149,9 +168,19 @@ namespace CodexSetup
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                Process.Start(psi);
+                if (Process.Start(psi) == null)
+                    problems.AppendLine("• 未能启动清理进程来删除安装目录：" + App.InstallDir);
             }
-            catch { }
+            catch (Exception ex) { problems.AppendLine("• 删除安装目录：" + ex.Message); }
+
+            error = problems.Length == 0 ? null : problems.ToString().TrimEnd();
+            return problems.Length == 0;
+        }
+
+        private static void TryDeleteFile(string path, string label, System.Text.StringBuilder problems)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception ex) { problems.AppendLine("• " + label + "：" + ex.Message); }
         }
 
         private static void Extract(string resourceName, string destPath)
@@ -211,11 +240,6 @@ namespace CodexSetup
                 }
             }
             catch { }
-        }
-
-        private static void SafeDelete(string path)
-        {
-            try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
 
         public static void Launch()

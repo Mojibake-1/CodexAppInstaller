@@ -4,8 +4,9 @@
 *.bak.exe
 /dist/
 
-# Editor / OS
+# Editor / OS / local tooling
 .vs/
 *.user
 Thumbs.db
 desktop.ini
+.claude/

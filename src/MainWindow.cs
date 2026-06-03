@@ -451,10 +451,15 @@ namespace CodexAppInstaller
         private void OnClosed(object sender, EventArgs e)
         {
             _windowClosed = true;   // stop any queued backend->UI updates from touching dead controls
+            bool wasInstalling = _running && !_resolveOnly;
             _running = false;
             _backend.Segment -= OnSegment;
             _backend.Exited -= OnExited;
             try { _backend.Cancel(); } catch { }
+            // Killing PowerShell with taskkill skips the script's own finally cleanup, so a
+            // partial _codexmsix temp dir (the MSIX download/extract, ~hundreds of MB) can be
+            // left behind. Sweep it up ourselves (unless the user asked to keep temp files).
+            if (wasInstalling) ScheduleWorkDirCleanup();
             Motion.StopShimmer(_shimmerSb, _shimmer);
             Motion.StopPulse(_dotPulseSb, _statusDot);
             _timer.Stop();
@@ -678,6 +683,8 @@ namespace CodexAppInstaller
                 _pips.Reset();
                 StopPulse();
                 SetStatus("已取消", "statusDotIdle");
+                // The killed script couldn't clean its own temp dir — do it for an install.
+                if (!_resolveOnly) ScheduleWorkDirCleanup();
                 return;
             }
 
@@ -819,6 +826,30 @@ namespace CodexAppInstaller
             TimeSpan el = DateTime.Now - _jobStart;
             string step = _totStep > 1 ? string.Format("步骤 {0}/{1}   ", Math.Max(1, _curStep), _totStep) : "";
             _telemetry.Text = string.Format("{0}{1:00}:{2:00}", step, (int)el.TotalMinutes, el.Seconds);
+        }
+
+        // Remove the backend's leftover "_codexmsix" temp dir after a kill (cancel/close),
+        // since the script's own finally cleanup never ran. Honors "keep temporary files".
+        // Runs detached with a retry loop so it still works once the killed process releases
+        // its file handles. No-op if the user chose to keep temp files or there is nothing left.
+        private void ScheduleWorkDirCleanup()
+        {
+            try
+            {
+                if (_keepTemp != null && _keepTemp.IsChecked == true) return;
+                string work = Path.Combine(_targetDir, "_codexmsix");
+                if (!Directory.Exists(work)) return;
+                string dq = "\"" + work + "\"";
+                var psi = new ProcessStartInfo("cmd.exe",
+                    "/c for /l %i in (1,1,20) do (rmdir /s /q " + dq + " 2>nul & if not exist " + dq + " (exit) else (timeout /t 1 /nobreak >nul))")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                Process.Start(psi);
+            }
+            catch { }
         }
 
         private void UpdateDiskFree()

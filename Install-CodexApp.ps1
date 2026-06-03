@@ -550,7 +550,11 @@ function Install-AppDir {
     param([string]$SourceDir, [string]$DestinationDir)
 
     New-Item -Path $DestinationDir -ItemType Directory -Force | Out-Null
-    & robocopy.exe $SourceDir $DestinationDir /E /COPY:DAT /R:2 /W:2 /NFL /NDL /NP /NJH /NJS
+    # /MIR mirrors the new package over the destination: it also PURGES files that the
+    # previous version left behind but the new MSIX no longer ships, preventing a mixed-
+    # version install. The destination is the app's own Codex directory (the GUI installs
+    # into <chosen>\Codex), so mirroring it is safe.
+    & robocopy.exe $SourceDir $DestinationDir /MIR /COPY:DAT /R:2 /W:2 /NFL /NDL /NP /NJH /NJS
     if ($LASTEXITCODE -ge 8) { throw "robocopy.exe failed with exit code $LASTEXITCODE." }
 }
 

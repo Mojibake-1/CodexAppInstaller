@@ -77,16 +77,31 @@ namespace CodexAppInstaller
                 {
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
-                    Cleanup();
+                    lock (gate)
+                    {
+                        // Only clear if the field still refers to THIS process, so a stale
+                        // Exited can never null out a process started afterwards.
+                        if (ReferenceEquals(process, p)) { try { p.Dispose(); } catch { } process = null; }
+                    }
                     var h = Exited;
                     if (h != null) h(code);
                 };
 
-                p.Start();
+                // Publish BEFORE starting: a process that exits almost immediately must not
+                // slip its Exited callback in ahead of this assignment and strand us as
+                // "running" forever (process != null with nothing actually running).
                 process = p;
-
-                StartReader(p.StandardOutput);
-                StartReader(p.StandardError);
+                try
+                {
+                    p.Start();
+                    StartReader(p.StandardOutput);
+                    StartReader(p.StandardError);
+                }
+                catch
+                {
+                    if (ReferenceEquals(process, p)) process = null;
+                    throw;
+                }
             }
         }
 
@@ -154,18 +169,6 @@ namespace CodexAppInstaller
                 if (!p.HasExited) KillTree(p.Id);
             }
             catch { }
-        }
-
-        private void Cleanup()
-        {
-            lock (gate)
-            {
-                if (process != null)
-                {
-                    try { process.Dispose(); } catch { }
-                    process = null;
-                }
-            }
         }
 
         private static void KillTree(int pid)
